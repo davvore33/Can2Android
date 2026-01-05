@@ -92,6 +92,8 @@ where SignalSample = { signalName, physicalValue, unit, timestamp }
 - This block is **optional** when the data source provides already-decoded signals
 - Future gRPC sources may emit SignalSample directly
 
+> **See also:** [Decoder Abstraction and Optionality](decoder-optionality.md) for detailed implementation patterns and examples.
+
 ---
 
 ### 2.4 Signal Stream Core
@@ -326,6 +328,8 @@ Data Source → Raw Frame Provider → Parser/Decoder → Signal Stream Core →
 gRPC Source → Signal Stream Core → Visualization
 (Parser/Decoder bypassed)
 ```
+
+> **Implementation Guide:** See [Decoder Abstraction and Optionality](decoder-optionality.md) for detailed implementation patterns, including the `SignalProvider` abstraction that enables decoder optionality.
 
 ---
 

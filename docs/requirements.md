@@ -133,6 +133,8 @@ For gRPC sources:
 - Parsing and decoding layers MUST be bypassable
 - The system MUST ingest already physical, time-based signals
 
+> **Architecture Details:** See [Decoder Abstraction and Optionality](decoder-optionality.md) for the complete design of how decoder bypass is achieved through the `SignalProvider` abstraction.
+
 ---
 
 ## 6. Hardware Feasibility Analysis (PoC Deliverable)
