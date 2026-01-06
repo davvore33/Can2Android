@@ -373,7 +373,33 @@ interface SignalDecoder {
 
 ---
 
-## 9. Architectural Validation Checklist
+## 9. Lifecycle and Execution Flow
+
+The system follows a well-defined lifecycle with proper startup, runtime, and shutdown phases. This ensures clean resource management, proper error handling, and the ability to start and stop components without resource leaks or cascading failures.
+
+**Key Documentation:**
+See [Lifecycle and Execution Flow](lifecycle-execution-flow.md) for comprehensive details on:
+- Component lifecycle states and transitions
+- Startup sequence (bottom-up initialization)
+- Shutdown sequence (top-down cleanup)
+- Error propagation and isolation strategies
+- Testing and validation guidelines
+
+**Summary:**
+- **Startup Order**: RawFrameProvider → SignalProvider → SignalStreamCore
+- **Shutdown Order**: SignalStreamCore → SignalProvider → RawFrameProvider (reverse)
+- **Error Handling**: Component failures are isolated and logged; partial operation continues when possible
+- **State Management**: All major components track their lifecycle state (IDLE, STARTING, ACTIVE, STOPPING, STOPPED, ERROR)
+
+**Components:**
+- `SystemLifecycleManager`: Coordinates startup and shutdown of all components
+- `SignalStreamCoreState`: Tracks lifecycle state of the core component
+- `SignalProviderState`: Tracks lifecycle state of signal providers
+- `DataSourceState`: Tracks lifecycle state of data sources
+
+---
+
+## 10. Architectural Validation Checklist
 
 The architecture is considered valid if:
 
@@ -383,10 +409,13 @@ The architecture is considered valid if:
 - ✅ Adding a new data source does NOT require refactoring Signal Stream Core
 - ✅ Signal Stream Core operates exclusively on `SignalSample`, never `RawCanFrame`
 - ✅ Visualization is decoupled from data acquisition method
+- ✅ Components can be started and stopped cleanly
+- ✅ Failures in one block do not crash unrelated blocks
+- ✅ System supports restart after clean shutdown
 
 ---
 
-## 10. Conclusion
+## 11. Conclusion
 
 This architecture ensures:
 
@@ -395,5 +424,6 @@ This architecture ensures:
 3. **Flexibility**: Parser/Decoder layer can be bypassed when not needed
 4. **Maintainability**: Clear boundaries prevent tight coupling
 5. **Testability**: Each block can be tested independently
+6. **Robustness**: Lifecycle management ensures clean startup/shutdown and error isolation
 
 The architecture supports both the current PoC scope (ASC files + DBC decoding) and future enhancements (USB CAN, gRPC streams) without requiring fundamental redesign.
