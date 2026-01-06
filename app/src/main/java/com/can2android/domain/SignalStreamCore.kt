@@ -1,6 +1,8 @@
 package com.can2android.domain
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -27,6 +29,12 @@ import kotlinx.coroutines.launch
  *
  * It operates purely on the abstraction of time-stamped physical signal values.
  *
+ * Lifecycle:
+ * - IDLE: Created but not started
+ * - ACTIVE: Running and processing signals
+ * - ERROR: Failed during operation
+ * - STOPPED: Cleanly stopped and resources released
+ *
  * @property signalProvider Source of signal samples (may be decoded locally or pre-decoded)
  * @property timeWindowMicros Time window duration in microseconds (default: 60 seconds)
  * @property scope CoroutineScope for managing coroutines
@@ -38,6 +46,17 @@ class SignalStreamCore(
 ) {
     private val buffers = mutableMapOf<String, SignalBuffer>()
     private val _signalUpdates = MutableSharedFlow<SignalUpdate>(replay = 0)
+    
+    /**
+     * Coroutine job for signal processing. Used to track and cancel the processing coroutine.
+     */
+    private var processingJob: Job? = null
+    
+    /**
+     * Current lifecycle state of the Signal Stream Core.
+     */
+    @Volatile
+    private var state: SignalStreamCoreState = SignalStreamCoreState.IDLE
 
     /**
      * Flow of signal updates that observers can collect.
@@ -48,32 +67,109 @@ class SignalStreamCore(
     val signalUpdates: SharedFlow<SignalUpdate> = _signalUpdates.asSharedFlow()
 
     /**
+     * Check if the Signal Stream Core is currently active.
+     *
+     * @return true if the core is in ACTIVE state, false otherwise
+     */
+    fun isActive(): Boolean = state == SignalStreamCoreState.ACTIVE
+
+    /**
+     * Get the current lifecycle state.
+     *
+     * @return Current state of the Signal Stream Core
+     */
+    fun getState(): SignalStreamCoreState = state
+
+    /**
      * Start the Signal Stream Core.
      *
      * This initiates the signal provider and begins processing incoming
-     * signal samples.
+     * signal samples. The core transitions from IDLE to ACTIVE state.
+     *
+     * @throws IllegalStateException if already started or in ERROR state
+     * @throws Exception if the signal provider fails to start
      */
     fun start() {
-        signalProvider.start()
+        if (state != SignalStreamCoreState.IDLE) {
+            throw IllegalStateException("Cannot start: already in state $state")
+        }
 
-        scope.launch {
-            signalProvider.observeSignals()
-                .collect { sample ->
-                    processSample(sample)
+        try {
+            state = SignalStreamCoreState.STARTING
+            
+            signalProvider.start()
+
+            processingJob = scope.launch {
+                try {
+                    signalProvider.observeSignals()
+                        .collect { sample ->
+                            processSample(sample)
+                        }
+                } catch (e: CancellationException) {
+                    // Normal cancellation during stop() - don't log as error
+                    throw e
+                } catch (e: Exception) {
+                    // Unexpected error during signal processing
+                    handleProcessingError(e)
+                    throw e
                 }
+            }
+            
+            state = SignalStreamCoreState.ACTIVE
+        } catch (e: Exception) {
+            state = SignalStreamCoreState.ERROR
+            throw e
         }
     }
 
     /**
      * Stop the Signal Stream Core.
      *
-     * This stops the signal provider and clears all buffers.
+     * This stops the signal provider, cancels signal processing, and clears all buffers.
+     * The core transitions to STOPPED state. This operation is idempotent and will not
+     * throw if called multiple times or when already stopped.
      */
     fun stop() {
-        signalProvider.stop()
-        synchronized(buffers) {
-            buffers.clear()
+        if (state == SignalStreamCoreState.STOPPED) {
+            return // Already stopped, nothing to do
         }
+
+        try {
+            state = SignalStreamCoreState.STOPPING
+            
+            // Cancel signal processing coroutine
+            processingJob?.cancel()
+            processingJob = null
+            
+            // Stop the signal provider
+            signalProvider.stop()
+            
+            // Clear all buffers
+            synchronized(buffers) {
+                buffers.clear()
+            }
+            
+            state = SignalStreamCoreState.STOPPED
+        } catch (e: Exception) {
+            // Log error but still transition to stopped state
+            // to prevent resource leaks
+            state = SignalStreamCoreState.STOPPED
+            throw e
+        }
+    }
+
+    /**
+     * Handle errors that occur during signal processing.
+     *
+     * This is called when an unexpected exception occurs in the signal
+     * processing coroutine. The core transitions to ERROR state.
+     *
+     * @param error The exception that occurred
+     */
+    private fun handleProcessingError(error: Exception) {
+        state = SignalStreamCoreState.ERROR
+        // In PoC, we just log. Future versions could emit error events
+        // or attempt recovery strategies.
     }
 
     /**
